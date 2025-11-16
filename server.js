@@ -40,7 +40,22 @@ app.use(express.static(join(__dirname, 'dashboard')));
 // Webhook endpoint for Vapi
 app.post('/api/orders', async (req, res) => {
   try {
-    const { businessId, customerName, customerPhone, items, specialInstructions, total } = req.body;
+    let { businessId, customerName, customerPhone, items, specialInstructions, total } = req.body;
+    
+    console.log('Received order:', req.body);
+    
+    // Parse items if it's a string
+    let parsedItems;
+    if (typeof items === 'string') {
+      try {
+        parsedItems = JSON.parse(items);
+      } catch (e) {
+        console.error('Failed to parse items string:', e);
+        parsedItems = [{ name: items, quantity: 1, modifications: [] }];
+      }
+    } else {
+      parsedItems = items;
+    }
     
     // Generate order number
     const orderNumber = `#${Date.now().toString().slice(-6)}`;
@@ -52,29 +67,29 @@ app.post('/api/orders', async (req, res) => {
     `);
     
     const result = insert.run(
-      businessId,
+      businessId || 'default',
       orderNumber,
-      customerName,
-      customerPhone,
-      JSON.stringify(items),
-      specialInstructions,
-      total
+      customerName || 'Guest',
+      customerPhone || '',
+      JSON.stringify(parsedItems),
+      specialInstructions || '',
+      total || 0
     );
     
     const order = {
       id: result.lastInsertRowid,
       orderNumber,
-      businessId,
-      customerName,
-      customerPhone,
-      items,
-      specialInstructions,
-      total,
+      businessId: businessId || 'default',
+      customerName: customerName || 'Guest',
+      customerPhone: customerPhone || '',
+      items: parsedItems,
+      specialInstructions: specialInstructions || '',
+      total: total || 0,
       createdAt: new Date().toISOString()
     };
     
     // Send to printer
-    await printOrder(businessId, order);
+    await printOrder(businessId || 'default', order);
     
     res.json({ success: true, order });
   } catch (error) {
@@ -126,18 +141,26 @@ app.patch('/api/orders/:id', (req, res) => {
 
 // Print function (supports PrintNode, CloudPRNT, or custom)
 async function printOrder(businessId, order) {
-  const printMethod = process.env.PRINT_METHOD; // 'printnode', 'cloudprnt', or 'webhook'
+  const printMethod = process.env.PRINT_METHOD;
+  
+  if (!printMethod) {
+    console.log('No print method configured');
+    return;
+  }
   
   // Format kitchen ticket
   const ticket = formatKitchenTicket(order);
   
-  if (printMethod === 'printnode') {
-    await printViaPrintNode(businessId, ticket);
-  } else if (printMethod === 'cloudprnt') {
-    await printViaCloudPRNT(businessId, ticket);
-  } else if (printMethod === 'webhook') {
-    // Send to custom webhook (for local client software)
-    await printViaWebhook(businessId, ticket);
+  try {
+    if (printMethod === 'printnode') {
+      await printViaPrintNode(businessId, ticket);
+    } else if (printMethod === 'cloudprnt') {
+      await printViaCloudPRNT(businessId, ticket);
+    } else if (printMethod === 'webhook') {
+      await printViaWebhook(businessId, ticket);
+    }
+  } catch (error) {
+    console.error('Print error:', error);
   }
 }
 
@@ -148,7 +171,9 @@ function formatKitchenTicket(order) {
   lines.push('================================');
   lines.push('');
   lines.push(`Customer: ${order.customerName}`);
-  lines.push(`Phone: ${order.customerPhone}`);
+  if (order.customerPhone) {
+    lines.push(`Phone: ${order.customerPhone}`);
+  }
   lines.push('');
   lines.push('--------------------------------');
   
@@ -180,15 +205,24 @@ function formatKitchenTicket(order) {
 
 async function printViaPrintNode(businessId, content) {
   const apiKey = process.env.PRINTNODE_API_KEY;
+  
+  if (!apiKey) {
+    console.log('PrintNode API key not configured');
+    return;
+  }
+  
   const printerIds = JSON.parse(process.env.PRINTER_IDS || '{}');
   const printerId = printerIds[businessId];
   
   if (!printerId) {
     console.log(`No printer configured for business ${businessId}`);
+    console.log('Available business IDs:', Object.keys(printerIds));
     return;
   }
   
-  await fetch('https://api.printnode.com/printjobs', {
+  console.log(`Printing to PrintNode printer ${printerId} for business ${businessId}`);
+  
+  const response = await fetch('https://api.printnode.com/printjobs', {
     method: 'POST',
     headers: {
       'Authorization': `Basic ${Buffer.from(apiKey + ':').toString('base64')}`,
@@ -202,11 +236,16 @@ async function printViaPrintNode(businessId, content) {
       source: 'Phone Order System'
     })
   });
+  
+  if (!response.ok) {
+    const error = await response.text();
+    console.error('PrintNode error:', error);
+  } else {
+    console.log('Print job sent successfully');
+  }
 }
 
 async function printViaCloudPRNT(businessId, content) {
-  // CloudPRNT implementation (Star printers)
-  // Printers poll a URL for jobs - you'd host the jobs at a specific endpoint
   console.log('CloudPRNT implementation pending');
 }
 
@@ -225,4 +264,6 @@ async function printViaWebhook(businessId, content) {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Dashboard: http://localhost:${PORT}`);
+  console.log(`Print method: ${process.env.PRINT_METHOD || 'not configured'}`);
 });
