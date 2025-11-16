@@ -1,1 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurant Orders</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📞 Phone Orders</h1>
+            <div class="business-selector">
+                <label>Business:</label>
+                <select id="businessSelect">
+                    <option value="">All Businesses</option>
+                    <option value="restaurant1">Restaurant 1</option>
+                    <option value="restaurant2">Restaurant 2</option>
+                </select>
+            </div>
+        </header>
 
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number" id="newOrders">0</div>
+                <div class="stat-label">New Orders</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="preparing">0</div>
+                <div class="stat-label">Preparing</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="completed">0</div>
+                <div class="stat-label">Completed Today</div>
+            </div>
+        </div>
+
+        <div class="orders-grid" id="ordersGrid">
+            <!-- Orders will be inserted here -->
+        </div>
+    </div>
+
+    <audio id="notificationSound" src="data:audio/wav;base64,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" preload="auto"></audio>
+
+    <script src="app.js"></script>
+</body>
+</html>
